@@ -144,7 +144,7 @@ rhel6中使用runlevel，7中用target替代
 对比两个系统的启动级别
 0              poweroff.target 
 1              resuce.target 
-2              multi-user.target 
+2              multi-user.target   （default.target的别名）
 3
 4
 5              graphical.target    
@@ -1706,11 +1706,11 @@ ntfs
  
 
  [root@centos6 ~]# pvscan   查看当前是否有物理卷存在 
- [root@centos6 ~]# pvcreate /dev/md0p{1,2,3,4}  创建pv，这里使用阵列中的4个分区来创建（可以理解为真实环境中使用了4块硬盘） 
+ [root@centos6 ~]# pvcreate /dev/md0p{1,2,3,4}  创建pv，这里使用阵列中的4个分区来创建（可以理解为真实环境中使用了4块硬盘）   可以使用pvremove //dev/sdXXXX/来卸载已经卸载了vg的物理卷
  [root@centos6 ~]# vgscan   查看当前是否存在卷组 
  [root@centos6 ~]# vgcreate vg0 /dev/md0p{1,2,3}   创建卷组，如果使用参数-s，后面跟上pe的大小，可以指定pe大小来划分。（比如 -s 16） 
  [root@centos6 ~]# lvcreate -n lv0 -L 1000M vg0   创建逻辑卷，如果希望添加LE的数量，使用-l参数。（比如 -l 25，表示添加25个4M大小pe） 
- [root@centos6 ~]# lvextend -l +115 /dev/vg0/lv0   扩展逻辑卷lv0的大小，扩展的数量是添加115个PE。 
+ [root@centos6 ~]# lvextend -l +115 /dev/vg0/lv0   扩展逻辑卷lv0的大小，扩展的数量是添加115个PE。   /这个+号很重要，如果没有加号，就是增加到
  [root@centos6 ~]# resize2fs /dev/vg   激活扩展的逻辑卷 
  [root@centos6 test]# vgextend vg0 /dev/md0p4  扩展卷组的大小，前提是有足够的物理卷 
  
@@ -2174,12 +2174,598 @@ systemctl disabled NetworkManager    关闭NM                         centos7
 
  [root@centos6 ~]# cd ~/.gnupg/ 
  这个目录下存放了公钥和私钥 
+ 
+ 
+ 
+ 
+ 2017/05/25 
+ BOOTPROTO--DHCP  
+ 使用UDP协议通信，端口是67和68 
+ dhcp discovery  客户端向服务器端发起的，用于查询dhcp服务器的位置，服务器端的67号端口用来监听此类包 
+ dchp offer 是服务器端通过68号端口向客户端发起的响应 
+ dchp request 是客户端向服务器端发起的请求，要求确认使用具体的ip等信息的。使用广播方式，如果存在其他的dhcp服务器，在收到这个广播包后，知道客户端已经选择了dhcp，会撤回前面发出的offer的信息。 
+ dhcpack 这个是服务器端对客户端的信息的请求的回复。 
+ dhcpnak  服务端发送给客户端，通常是因为地址过期或者无效 
+ dchpdecline  客户端发送给服务器端，通常是地址被占用 
+ dchpinfrom  客户端向服务器端申请参数 
+ 
+
+ [root@centos6 ~]# yum install dhcp -y  安装dhcp服务 
+ [root@centos6 ~]# iptables -I INPUT 1 -p udp --dport 67 -j ACCEPT 
+ [root@centos6 ~]# iptables -I INPUT 1 -p udp --dport 68 -j ACCEPT 
+ [root@centos6 ~]# service iptables save 
+ [root@centos6 ~]# cp /usr/share/doc/dhcp-4.1.1/dhcpd.conf.sample /etc/dhcp/dhcpd.conf   生成配置文件 
+ 作用域格式： 
+ subnet ip netmask {        
+  中间写这个作用域的信息   
+    } 
+ 
+
+ [root@centos6 ~]# cat /var/lib/dhclient/dhclient-eth0.leases  在客户端上可以查看dhcp的租约等数据信息 
+ 
+
+ 
+
+ 超级作用域格式： 
+ shared-network 11-22 { 
+ 	subnetsubnet ip netmask {        
+  中间写这个作用域的信息   
+    }  
+    subnet ip netmask {        
+  中间写这个作用域的信息   
+    } 
+    subnet ip netmask {        
+  中间写这个作用域的信息   
+    } 
+ 
+
+ } 
+
+/06/01   DNS服务器 
+ Domain name server  实现的是主机域名和ip的映射 
+ dns  udp协议   端口53   tcp协议  
+ 工作方式：递归和迭代 
+ www.baidu.com. 
+ 主机名.三级域名.二级域名.顶级域名.根域 
+ 
+
+ dns的递归查询：客户端--服务器 
+ 13台根域服务器  A-M  
+ dns的迭代查询：服务器--服务器 
+ 
+
+ rhel6中的named 
+ 1、服务器的安装（chroot） 
+ [root@RA ~]# yum install bind bind-chroot -y 
+ 安装dns服务器了，出于安全考虑，我们同时安装chroot用来隔离环境。主要是防止渗透者在攻破dns服务器后在真实根目录下的一些操作。 
+ 注：默认情况下dns服务器的主配置文件是/etc/named.conf，数据文件在/var/named/目录下。但是，因为我们使用了chroot隔离，所以，默认的文件我们都不使用。chroot后的根是/var/named/chroot 
+ 
+
+ [root@RA ~]# service named restart  重启服务后chroot下面的配置文件会自动生成 
+ [root@RA ~]# vim /var/named/chroot/etc/named.conf  
+ 查看配置文件 
+  10 options { 
+  11 //从这里开始就是全局的设置,默认只监听自己的，改为监听所有 
+  12         listen-on port 53 { any; }; 
+  13         listen-on-v6 port 53 { ::1; }; 
+  14 //区域文件存储路径，因为做了chroot，这里的/其实是/var/named/chroot 
+  15         directory       "/var/named"; 
+  16 //往下三行内容都是进行统计的 
+  17         dump-file       "/var/named/data/cache_dump.db"; 
+  18         statistics-file "/var/named/data/named_stats.txt"; 
+  19         memstatistics-file "/var/named/data/named_mem_stats.txt"; 
+  20 //允许谁进行DNS查询 
+  21         allow-query     { any; }; 
+  22 //是否允许dns转发，理解为我们就是一台从dns服务器 
+  23 //        allow-transfer  { none; }; 
+  24 //是否允许递归查询 
+  25         recursion yes; 
+  26  
+  27 //      dnssec-enable yes; 
+  28 //      dnssec-validation yes; 
+  29  
+  30         /* Path to ISC DLV key */ 
+  31 //      bindkeys-file "/etc/named.iscdlv.key"; 
+  32  
+  33 //      managed-keys-directory "/var/named/dynamic"; 
+  34 }; 
+ 
+
+   
+  zone "google.com" IN { 
+         type master; 
+         file "google.com.zone"; 
+ }; 
+ 
+
+ [root@RA etc]# named-checkconf  
+ 检测配置文件语法错误，一定要通过语法检测，否则重启服务会导致chroot中的所有配置文件丢失 
+ 
+
+ [root@RA named]# cp named.localhost google.com.zone 
+ 拷贝模板生成指定域的配置文件 
+ 
+
+ [root@RA named]# chown root.named google.com.zone  
+ 保证新的区域数据文件的所有者和所属组和系统一致 
+ 
+
+ DNS服务器配置中的类型： 
+ NS--   name server 
+ A --   address 
+ PTR--  反向记录 
+ CNAME--别名 
+ MX--email 
+ 
+
+ 
+
+ $TTL 1D 
+ @       IN
+                                         0       ; serial 
+                                         1D      ; refresh 
+                                         1H      ; retry 
+                                         1W      ; expire 
+                                         3H )    ; minimum 
+         NS      dns.example.com. 
+ dns     A       192.168.4.137 
+ www     A       92.8.4.128 
+ wap     CNAME www 
+ ftp      A       192.168.4.137 
+ [root@RA named]# named-checkzone  example.com example.com.zone  检测域文件的语法  
+   
+ [root@centos6 ~]# host wap.example.com   客户端解析域名 
+ 
+
+ [root@centos6 ~]# host -l  example.com  解析域名中的所有主机 
+ 在客户机的dns指向中添加dns的ip
+linux在/etc/resolv.conf中添加 
+nameserver  IP
+ 
+ 反向解析：在named.conf文件中添加 
+ zone "4.168.192.in-addr.arpa" IN { 
+         type master; 
+         file "example.com.arpa"; 
+ }; 
+ [root@DNS named]# cp -rp example.com.zone example.com.arpa  生成反向解析的文件 
+ 
+
+ 主从DNS服务器 
+ 为了保证服务的高用性，要求每个区域中有多台dns能提供冗余服务。 
+ 从服务器上同样安装bind 的工具包，然后在主配置文件中修改如下 
+ zone "example.com" IN { 
+         type slave; 
+         file "slave/example.com.zone"; 
+         masters { 192.168.4.137; }; 
+ }; 
+ 
+
+ 这里数据文件要放在slave目录下。masters是定义的主dns服务器 
+ 
+
+ 在主dns服务器上添加如下内容： 
+         allow-transfer  { 192.168.4.139; }; 
+ 指定授权的从dns服务器 
+ 
+
+ 
+
+ 
+
+ 为了防止主从dns之间被第三方拦截同步信息，可以使用TSIG事务数字签名认证 
+ [root@DNS chroot]# dnssec-keygen -a HMAC-md5 -b 128 -n HOST hf 
+ 使用工具生成一对密钥。一个是key，一个private 
+ 在主服务器的配置文件中添加如下 
+   allow-transfer  { key hf ; }; 
+ 
+
+ server 192.168.4.139 {          //这个地址是从的 
+         keys { hf ; }; 
+ }; 
+ key  hf { algorithm  hmac-md5; 
+           secret RJR+CvADx1dMjJ7pNdNisw== ; 
+ }; 
+ 
+
+ 
+
+ 在从服务器上做同样的配置 
+ server 192.168.4.137 {          //这个地址是主的 
+         keys { hf ; }; 
+ }; 
+ key  hf { algorithm  hmac-md5; 
+           secret RJR+CvADx1dMjJ7pNdNisw== ; 
+ }; 
+视图的DNS解析 
+ 
+
+ 2017/06/06  NTP服务器 
+ 1884年  国际子午线 
+ 格林威治  英国   GMT 
+ 原子钟 
+ UTC 协调世界时 
+ 夏令时 
+ win操作系统默认使用的是UTC时间 
+ linux系统默认使用的是bios时间（晶震电路） 
+ RHEL6中的NTP服务器 
+ [root@DNS ~]# service ntpd status   查看服务器状态 
+ [root@DNS ~]# service ntpd restart   重启ntp服务器 
+ [root@DNS ~]# cat /etc/sysconfig/clock   查看当前时区 
+ [root@DNS ~]# vim /etc/ntp.conf  
+ 
+
+  restrict default kod nomodify notrap nopeer noquery 
+ 权限  默认 
+ kod 是不接受kod的包，错误发送的包，容易被利用为ddos攻击包 
+ nomodify 不接受客户端发起的修改ntp参数的请求 
+ notrp  不接受trap陷阱包，trap包是可以远程调用日志的 
+ nopeer  上下级的ntp关系断开，下级ntp服务器不能请求同步 
+ noquery  客户端不允许发送ntp请求 
+ 
+
+ 备注：具体配置查看相关服务配置文件 
+ [root@DNS ~]# chkconfig ntpd on   重启服务后设置开机启动 
+ 
+
+ [root@DNS ~]# ntpstat  查看当前ntp服务器的状态 
+ synchronised to NTP server (51.15.41.135) at stratum 3  
+    time correct to within 427 ms 
+    polling server every 64 s 
+ 
+
+ [root@DNS ~]# ntpq -p   linux客户端可以查看和上层ntp服务器的连接 
+ 
+
+ 昨天实验中出现的一些问题以及可能出现的问题汇总： 
+ 1、xp连接失败，报错时间例子被拒绝，对等机器太少。 
+ 这个查阅了文档，发现是昨天设置的时间拉的太长导致。xp的时间差尽量不要大于24小时以上。另外，xp和ntp的连接需要15分钟左右。所以可以耐心等待一段时间，我后面看了下，一段时间后它自己连上了。 
+ 2、ntpdate手动同步时报错，socket被连接占用 
+ ntpdate时如果ntpd服务器开启情况下会冲突，需要先停止ntp服务器。另外ntpdate建议在ntp启动前运行一次就可以，不要经常运行。它可能会引起时间的跳跃，让时间不按线性流动，造成一些特定程序的bug。 
+ 
+
+ 
+
+ rhel7中的时钟服务器 chrony 
+ chronyd和chronyc 
+ chronyd是一个后台运行的守护进程，用于调整内核中运行的系统时钟和时钟服务器同步。它确定计算机增减时间的比率，并对此进行补偿。 
+ chronyc用来实现监控和配置 
+ 优点是比ntpd在时钟的弥补上更先进，同时在时钟的准确率上有改进，同步上也更加精确。 
+ 
+
+ [root@centos7 /]# yum install chrony\*   安装 
+ [root@centos7 /]# systemctl enable chronyd    开机启动 
+ [root@centos7 /]# systemctl restart chronyd   重启 
+ [root@centos7 /]# systemctl status chrony   查看状态 
+ [root@centos7 /]# chronyc sources -v   查看和上层同步状态 
+ 注：配置文件上传github 
+ 
+
+ 2017/06/08  APACHE  
+ apache    a patchy server 一个打满补丁的服务器 
+ tomcat  
+ nginx 
+ IIS 
+ web  网站服务器 C/S  
+ HTTP  端口80   daemons  httpd 
+ [root@DNS ~]# yum install httpd\* -y  安装apache 
+ [root@DNS ~]# vim /etc/httpd/conf/httpd.conf  
+ apache的主配置文件 
+ 
+
+ 基于htaccess的验证 
+ vim .htaccess 
+ AuthName xxxxxxxxxx 
+ AuthType Basic 
+ AuthUserFile /var/www/html/.htpasswd 
+ Require user tom 
+                 
+ [root@DNS html]# htpasswd -c -m .htpasswd tom 创建一个密码文件 
+ 
+
+ 然后修改主配置文件，对目录权限重新定义 
+ <Directory "/var/www/html/xx"> 
+     Options FollowSymLinks 
+     AllowOverride Authconfig    主要修改这里 
+     Order deny,allow 
+     allow from all 
+ </Directory> 
+ 
+
+ 基于主机名的虚拟主机--用户通过不同的域名访问不同的网站，用户访问的不同的网站其实存在于同一台主机。这些不同的站点在同一台服务器上，我们就叫虚拟主机。 
+ 
+
+ 基于IP地址的虚拟主机--在同一台服务器上提供多个ip地址访问不同的域名 
+ [root@DNS ~]# ip addr add 192.168.24.5/24 dev eth0 label eth0:1 
+ [root@DNS ~]# ip addr add 192.168.24.6/24 dev eth0 label eth0:2 
+ 在一块网卡上设置多个ip 
+ 
+
+ 基于端口的虚拟主机 
+ 
+
+ 
+
+ 在rhel7中如果修改了默认的http端口，除了防火墙要放行，开启selinux的情况下，还要修改端口的上下文 
+ [root@centos7 ~]# yum whatprovides semanage 
+ 安装工具 
+ 
+
+ WEB的TLS 
+ SSL  网景  secure socket layer 
+ TLS 传输层安全   是一个国际标准 ，几乎所有涉及到金融的网站都会使用https，目前更多其他领域的网站也在加入https行列。  
+ https的使用中RSA AES MD5 SHA，还包括证书。证书本身就是一对密钥（非对称算法，RSA或ECC） 
+ HTTPS的传输原理： 
+ 1、客户端----服务器端 
+ 向服务器端（web服务器）发起请求，请求中包含自身能够使用的加密算法或者压缩算法 
+ 2、服务器----客户端 
+ 如果服务器在收到的客户端的工具集中发现有自己无法使用的算法，那么拒绝连接。反之服务器端向对方发送自己可以使用的哪些算法，并把这些信息放在证书中发送给客户端（证书注册的时间、注册的机构、有效期、失效期以及网址等信息） 
+ 3、客户端----服务器 
+ 客户端收到这些信息后，首先判断证书的合法性。如果证书没有被授信，那么用户可以自己决定是不是要继续访问站点。如果证书合法，这时客户端生成一个随机数，用服务器证书中的公钥加密，这步是为了防止数据传输中被窃听。用前二次交流中确定的hash算法对消息做数字签名，一起发送给服务器端。 
+ 4、服务器----客户端 
+ 服务器端对收到的消息用私钥解密，获取随机数（密码），然后通过hash比对，判断消息的一致性。 
+ 5、后面的连接客户端用随机数使用对称算法加密和服务器端进行数据传输。如果中间连接断开，那么重复上面的步骤。这个过程中，两边协商的对称加密的密码都只有双方知道了，不存在中间人攻击等可能。 
+ 为什么要认证证书？ 
+ 整个传输过程中的加密算法和实现方式都是透明的，不存在任何秘密，也就意味着理论上任何人可以生成证书。 
+ 有专门可信赖的第三方的证书认证机构，最顶层的叫root ca。 
+ 
+
+ [root@centos7 ~]# yum install mod_ssl  安装apache的ssl模块 
+ [root@centos7 ~]# vim /etc/httpd/conf.d/ssl.conf  
+ 配置ssl模块 
+ [root@centos7 conf]# cd /etc/pki/tls/certs/ 
+ 进入目录 
+ [root@centos7 certs]# make /etc/httpd/conf/test.crt 
+ 生成证书 
+ 
+
+ 
+
+ 针对特殊站点的认证 
+ 
+
+ 
+
+ web站点压力测试 
+ [root@DNS conf]# ab -n 20000 -c 10000 www.test.com/index.html 
+ 
+
+ [root@c7 ~]# yum install webalizer 用epel源安装 
+ [root@c7 ~]# vim /etc/httpd/conf.d/webalizer.conf  
+ [root@c7 ~]# webalizer   启动 
 
  
  
+ 2017/06/13  数据库
+oracle  甲骨文 
+mysql    SUN（oracle）  开源
+sqlserver 微软
+mariadb  （rhel7）  红帽收编了mysql的开发团队
+nosql  
+
+yum install mariadb\*   
+systemctl start mariadb.service 
+firewall-cmd --add-service=mysql
+mysql 登入数据库，默认以root@localhost身份登录，不同于root，这个身份只能本地登录。
+MariaDB [(none)]> select user();
+MariaDB [(none)]> select version()；
+MariaDB [(none)]> select engines
+MariaDB [(none)]> show databases;  查看当前mariadb中有哪些数据库
+[root@xxl ~]# vim /etc/my.cnf  数据库配置文件
+MariaDB [(none)]> system clear  在数据库中使用系统指令
+MariaDB [(none)]> \! clear  数据库中使用系统指令
+MariaDB [(none)]> create database rhel7;  创建名为rhel7的数据库
+MariaDB [(none)]> drop database rhel7;  删除数据库
+MariaDB [(none)]> create database rhel7 charset=gbk;
+指定编码创建数据库
+MariaDB [(none)]> alter database rhel7 charset=utf8;
+修改数据库的编码
+MariaDB [(none)]> use rhel7;  进入数据库rhel7
+MariaDB [rhel7]> show tables; 查看数据库里的表
+MariaDB [rhel7]> create table xx ( id int, name varchar(10), age int, email varchar(20));
+创建一张表
+MariaDB [rhel7]> desc xx; 查看表类型
+MariaDB [rhel7]> select * from xx;查询表中的内容，* 表示所有
+MariaDB [rhel7]> insert into xx  (id,name,age,email)  values(1,'tom',24,'tom@qq.com');
+向表中插入内容
+MariaDB [rhel7]> rename table xx to google; 改名
+MariaDB [rhel7]> select * from google where name='jarry';  搜索时加上条件，where是一个关键词，用来在前面的结果中去过滤
+MariaDB [rhel7]> alter table google drop age;
+删除某一列
+MariaDB [rhel7]> alter table google add phone int;
+添加一列
+MariaDB [rhel7]> alter table google add phone int(11) after name;
+指定列所在的位置
+MariaDB [rhel7]> select phone from bb where 
+    -> id=(select id from aa where name='bob');
+	通过表连接查询
+MariaDB [rhel7]> select * from aa join bb;
+通过多表查询，但通过这种方式获取的结果会产生笛卡尔积
+MariaDB [rhel7]> select * from aa join bb using(id);
+优化后的多表查询
+MariaDB [rhel7]> select phone from aa join bb using(id) where name='bob';
+多表查询bob的电话
  
+systemctl enable xxxx   7
+chkconfig xxxxx on        6  设置开机启动
+
+
+
+
+MariaDB [rhel7]> update bb set sal=4800 where id=2; 
+ 更新bb表中id为2的sal列的值 
+ MariaDB [rhel7]> select count(*)  from  aa; 
+ 统计aa表的row数值 
+ MariaDB [mysql]> select user,host,password from user; 
+ 按指定的column查看表中的内容 
+ MariaDB [mysql]> select * from rhel7.aa 
  
 
+ 为数据库设置密码 
+ MariaDB [mysql]> set password=password("redhat"); 
+ [root@centos7 ~]# mysqladmin -uroot -p password 设置密码 
+ [root@centos7 ~]# mysql -uroot -hlocalhost -p  
+ 通过密码登录 
+ 
+
+ MariaDB [(none)]> update user set password=password("centos")  where host='localhost' and user='root';  更新系统密码 
+ MariaDB [(none)]> flush privileges; 
+ 刷新缓存，让配置生效 
+ 
+
+ 一、重置数据库密码： 
+ MariaDB [(none)]> update mysql.user set password=null;    清空数据库中的所有密码 
+ 
+
+ 二、通过安全模式重置密码 
+ 首先停止运行数据库 
+ [root@centos7 ~]# vim /etc/my.cnf 
+  10 skip-grant-tables 
+ 让数据库进入安全模式 
+ 
+
+ 使用命令增加数据库密码安全 
+ [root@centos7 ~]# mysql_secure_installation  
+ 
+
+ 设置数据库管理员 
+ MariaDB [mysql]> create user tom@localhost;  这种方式创建的用户只能本地登录 
+ MariaDB [mysql]> create user tom 
+ 这个用户可以在任何地点登录 
+ MariaDB [mysql]> grant create on rhel7.aa to tom@'192.168.24.4' identified by 'tom';  赋权tom用户使用密码tom登录数据库rhel7下的aa表具有创建的权限 
+ MariaDB [mysql]> grant drop on rhel7.cc to tom@'192.168.24.4' ; 
+ 赋权用户对数据库中的表具有删除的权限 
+ MariaDB [mysql]> revoke drop on rhel7.cc from tom@'192.168.24.4'; 
+ 从用户端收回权限drop，注意连接关键词是from 
+ 
+
+ 数据库的备份和恢复 
+ [root@centos7 ~]# mysqldump  这个工具专门用来提供数据库的库和表的备份 
+ [root@centos7 ~]# mysqldump -uroot -p rhel7 aa > aa.bak 
+ 使用重定向的方式完成备份，备份后的数据是用二进制表示的日志文件，如果不重定向，只会在终端输出。 
+ MariaDB [rhel7]> source /root/aa.bak 
+ 恢复表 
+ [root@centos7 ~]# mysqldump -uroot -p rhel7 > rhel7.bak  
+ 备份数据库中的所有表 
+ [root@centos7 ~]# mysqldump -uroot -p rhel7 < rhel7.bak  
+ 恢复数据库 
+ 
+
+ 
+
+ 3、安装并管理PHP环境 
+ ①安装PHP 
+ [root@hf ~]# yum install php 
+ ②安装PHP组件，使PHP支持 MariaDB 
+ [root@hf ~]#yum install php-mysql php-gd libjpeg* php-ldap php-odbc php-pear php-xml php-xmlrpc php-mhash 
+ ③重启mariadb服务 
+ [root@hf ~]#systemctl restart mariadb 
+ 
+
+ 4、配置Apache服务器 
+ ①编辑apache配置文件 
+ [root@hf ~]#vim /etc/httpd/conf/httpd.conf 
+ ServerSignature On #添加，在错误页中显示Apache的版本，Off为不显示 
+ Options Indexes FollowSymLinks #修改为：Options Includes ExecCGI FollowSymLinks（允许服务器执行CGI及SSI，禁止列出目录）  
+ AddHandler cgi-script .cgi #修改为：AddHandler cgi-script .cgi .pl （允许扩展名为.pl的CGI脚本运行）  
+ AllowOverride None #修改为：AllowOverride All （允许.htaccess）  
+ AddDefaultCharset UTF-8 #修改为：AddDefaultCharset GB2312 （添加GB2312为默认编码）  
+ #Options Indexes FollowSymLinks #修改为 Options FollowSymLinks（不在浏览器上显示树状目录结构） 
+ DirectoryIndex index.html #修改为：DirectoryIndex index.html index.htm Default.html Default.htm index.php（设置默认首页文件，增加index.php）  
+ MaxKeepAliveRequests 500 #添加同时连接数 
+ 
+
+ ②重启apache服务 
+ [root@hf ~]# systemctl restart httpd 
+ 
+
+ ③删除默认测试页面 
+ [root@hf ~]# rm -f /etc/httpd/conf.d/welcome.conf /var/www/error/noindex.html  
+ 
+
+ 2016/06/18 
+ LAMP服务器的部署--BBS 
+ L--linux    作为底层的操作系统 
+ A--apache   作为web的服务前端 
+ M--mariadb  数据库用来存储数据 
+ P--php/perl/python   编程语言 
+ 
+
+ 
+
+ 1、安装apache并且配置 
+ 2、搭建mariadb服务器并配置 
+ [root@centos7 ~]# cp /usr/share/mysql/my-huge.cnf /etc/my.cnf 
+ 3、安装php 
+ yum install php php-mysql php-gd libjpeg* php-ldap php-odbc php-pera php-xml php-xmlrpc php-mahash  
+ 
+
+ 4、配置httpd 
+ 129     Options INCLUDES ExecCGI FollowSymLinks 
+ #让服务器允许执行CGI等文件，禁止列出目录 
+ 270     AddHandler cgi-script .cgi  
+ #允许服务器执行后缀cig的脚本，可以添加其他的自定义脚本的后缀 
+ 
+
+ 5、配置php 
+ [root@hf ~]#vim /etc/php.ini  
+ date.timezone = PRC      #把前面的分号去掉，改为date.timezone = PRC  
+ disable_functions = passthru,exec,system,chroot,scandir,chgrp,chown,shell_exec,proc_open,proc_get_status,ini_alter,ini_alter,ini_restore,dl,openlog,syslog,readlink,symlink,popepassthru,stream_socket_server,escapeshellcmd,dll,popen,disk_free_space,checkdnsrr,checkdnsrr,getservbyname,getservbyport,disk_total_space,posix_ctermid,posix_get_last_error,posix_getcwd, posix_getegid,posix_geteuid,posix_getgid, posix_getgrgid,posix_getgrnam,posix_getgroups,posix_getlogin,posix_getpgid,posix_getpgrp,posix_getpid, posix_getppid,posix_getpwnam,posix_getpwuid, posix_getrlimit, posix_getsid,posix_getuid,posix_isatty, posix_kill,posix_mkfifo,posix_setegid,posix_seteuid,posix_setgid, posix_setpgid,posix_setsid,posix_setuid,posix_strerror,posix_times,posix_ttyname,posix_uname 
+ #列出PHP可以禁用的函数，如果某些程序需要用到这个函数，可以删除，取消禁用。 
+ expose_php = Off #禁止显示php版本的信息  
+ magic_quotes_gpc = On #打开magic_quotes_gpc来防止SQL注入  
+ short_open_tag = ON #支持php短标签 
+ open_basedir =                   #写上程序的目录，定义为自己的目录 
+ 
+
+ [root@hf ~]#systemctl restart mariadb.service #重启MariaDB  
+ [root@hf ~]#systemctl restart httpd.service #重启apache  
+ 
+
+ 6、测试 
+ [root@hf ~]# cd /var/www/html  
+ [root@hf ~]#vim index.php #输入下面内容 
+  <?php  
+ phpinfo();  
+ ?>  
+ 
+
+ LEMP  
+ L--linux 
+ N--nginx 俄罗斯 
+ M--mariadb 
+ P--php/perl/python 
+ 
+
+ 1、安装nginx 
+ yum install nginx   通过epel源安装 
+ yum install php-fpm   
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+	
  
 
 
